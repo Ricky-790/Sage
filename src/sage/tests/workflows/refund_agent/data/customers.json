@@ -1,0 +1,17 @@
+[
+  {
+    "customer_id": "C-1001",
+    "name": "Ada Lovelace",
+    "email": "ada@example.com"
+  },
+  {
+    "customer_id": "C-1002",
+    "name": "Grace Hopper",
+    "email": "grace@example.com"
+  },
+  {
+    "customer_id": "C-1003",
+    "name": "Alan Turing",
+    "email": "alan@example.com"
+  }
+]

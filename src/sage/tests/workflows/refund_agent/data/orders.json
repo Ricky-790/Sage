@@ -1,0 +1,30 @@
+[
+  {
+    "order_id": "O-1001",
+    "customer_id": "C-1001",
+    "status": "cancelled",
+    "amount_cents": 4999,
+    "currency": "USD"
+  },
+  {
+    "order_id": "O-1002",
+    "customer_id": "C-1001",
+    "status": "delivered",
+    "amount_cents": 12000,
+    "currency": "USD"
+  },
+  {
+    "order_id": "O-1003",
+    "customer_id": "C-1002",
+    "status": "cancelled",
+    "amount_cents": 7500,
+    "currency": "USD"
+  },
+  {
+    "order_id": "O-1004",
+    "customer_id": "C-1003",
+    "status": "cancelled",
+    "amount_cents": 2500,
+    "currency": "USD"
+  }
+]
