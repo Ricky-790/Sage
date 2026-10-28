@@ -3,7 +3,6 @@ from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
-from typing_extensions import Optional
 
 
 class SpanKind(StrEnum):

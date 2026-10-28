@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import threading
 import time
 import traceback
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
@@ -11,6 +13,7 @@ from langchain_core.messages import AIMessage
 from langchain_core.outputs import ChatGeneration, LLMResult
 
 from sage.recorder import Recorder
+from sage.recorder.adapters import to_jsonable
 from sage.recorder.models import (
     Span,
     SpanError,
@@ -22,35 +25,6 @@ from sage.recorder.models import (
 
 def _now() -> datetime:
     return datetime.now(UTC)
-
-
-def _jsonable(value: Any) -> Any:
-    """Convert common LangChain objects into JSON-compatible values."""
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-
-    if isinstance(value, UUID):
-        return str(value)
-
-    if isinstance(value, dict):
-        return {str(k): _jsonable(v) for k, v in value.items()}
-
-    if isinstance(value, (list, tuple)):
-        return [_jsonable(item) for item in value]
-
-    if hasattr(value, "model_dump"):
-        return _jsonable(value.model_dump(mode="json"))
-
-    if hasattr(value, "dict"):
-        return _jsonable(value.dict())
-
-    if hasattr(value, "content"):
-        return {
-            "type": type(value).__name__,
-            "content": _jsonable(value.content),
-        }
-
-    return str(value)
 
 
 def _error_info(error: BaseException) -> SpanError:
@@ -82,23 +56,24 @@ def _token_usage(response: LLMResult) -> SpanUsage | None:
         return None
 
     return SpanUsage(
-        input_tokens=usage["input_tokens"],
-        output_tokens=usage["output_tokens"],
-        total_tokens=usage["total_tokens"],
+        input_tokens=usage.get("input_tokens"),
+        output_tokens=usage.get("output_tokens"),
+        total_tokens=usage.get("total_tokens"),
     )
 
 
 class LangChainRecorderCallback(BaseCallbackHandler):
-    def __init__(self, recorder: Any) -> None:
+    def __init__(self, recorder: Recorder) -> None:
         super().__init__()
         self.recorder = recorder
+        self._lock = threading.Lock()
         self._spans: dict[UUID, Span] = {}  # Holds each operation's in-progress Span.
         self._start_times: dict[
             UUID, float
         ] = {}  # Holds monotonic start times for measuring duration.
         self._run_context: dict[
-            UUID, tuple[str, str | None]
-        ] = {}  # { current_span_id : ( trace_id, parent_span_id) }
+            UUID, tuple[str, str]
+        ] = {}  # run_id -> (trace_id, span_id)
 
     def _start(
         self,
@@ -110,31 +85,40 @@ class LangChainRecorderCallback(BaseCallbackHandler):
         inputs: Any,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        parent_context = (
-            self._run_context.get(parent_run_id) if parent_run_id is not None else None
-        )
+        with self._lock:
+            parent_context = (
+                self._run_context.get(parent_run_id)
+                if parent_run_id is not None
+                else None
+            )
 
-        trace_id = parent_context[0] if parent_context else str(run_id)
+            if parent_context:
+                trace_id, parent_span_id = parent_context
+            else:
+                active_trace_id, active_span_id = self.recorder.current_ids()
+                if active_trace_id is not None and active_span_id is not None:
+                    trace_id = active_trace_id
+                    parent_span_id = active_span_id
+                else:
+                    trace_id = str(run_id)
+                    parent_span_id = None
 
-        span = Span(
-            trace_id=trace_id,
-            span_id=str(run_id),
-            parent_span_id=str(parent_run_id) if parent_run_id else None,
-            name=name,
-            kind=kind,
-            status=SpanStatus.RUNNING,
-            started_at=_now(),
-            input=_jsonable(inputs),
-            output=None,
-            metadata=_jsonable(metadata or {}),
-        )
+            span = Span(
+                trace_id=trace_id,
+                span_id=str(run_id),
+                parent_span_id=parent_span_id,
+                name=name,
+                kind=kind,
+                status=SpanStatus.RUNNING,
+                started_at=_now(),
+                input=to_jsonable(inputs),
+                output=None,
+                metadata=to_jsonable(metadata or {}),
+            )
 
-        self._spans[run_id] = span
-        self._start_times[run_id] = time.perf_counter()
-        self._run_context[run_id] = (
-            trace_id,
-            str(parent_run_id) if parent_run_id else None,
-        )
+            self._spans[run_id] = span
+            self._start_times[run_id] = time.perf_counter()
+            self._run_context[run_id] = (trace_id, span.span_id)
 
     def _finish(
         self,
@@ -145,8 +129,10 @@ class LangChainRecorderCallback(BaseCallbackHandler):
         usage: SpanUsage | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        span = self._spans.pop(run_id, None)
-        started = self._start_times.pop(run_id, None)
+        with self._lock:
+            span = self._spans.pop(run_id, None)
+            started = self._start_times.pop(run_id, None)
+            self._run_context.pop(run_id, None)
 
         if span is None:
             return
@@ -156,7 +142,7 @@ class LangChainRecorderCallback(BaseCallbackHandler):
             span.duration = max(0.0, time.perf_counter() - started)
 
         span.status = SpanStatus.ERROR if error else SpanStatus.OK
-        span.output = _jsonable(output)
+        span.output = to_jsonable(output)
 
         if error is not None:
             span.error = _error_info(error)
@@ -165,9 +151,8 @@ class LangChainRecorderCallback(BaseCallbackHandler):
             span.usage = usage
 
         if metadata:
-            span.metadata.update(_jsonable(metadata))
+            span.metadata.update(to_jsonable(metadata))
 
-        # Assumes Recorder exposes record_span(Span).
         self.recorder.record_span(span)
 
     # ---- LLMs and chat models ----
@@ -186,7 +171,7 @@ class LangChainRecorderCallback(BaseCallbackHandler):
         self._start(
             run_id=run_id,
             parent_run_id=parent_run_id,
-            name=serialized.get("name", "llm"),
+            name=(serialized or {}).get("name") or "llm",
             kind=SpanKind.LLM,
             inputs={"prompts": prompts},
             metadata={
@@ -211,7 +196,7 @@ class LangChainRecorderCallback(BaseCallbackHandler):
         self._start(
             run_id=run_id,
             parent_run_id=parent_run_id,
-            name=serialized.get("name", "chat_model"),
+            name=(serialized or {}).get("name") or "chat_model",
             kind=SpanKind.LLM,
             inputs={"messages": messages},
             metadata={
@@ -264,7 +249,7 @@ class LangChainRecorderCallback(BaseCallbackHandler):
         self._start(
             run_id=run_id,
             parent_run_id=parent_run_id,
-            name=serialized.get("name", "tool"),
+            name=(serialized or {}).get("name") or "tool",
             kind=SpanKind.TOOL,
             inputs=inputs if inputs is not None else input_str,
             metadata={
@@ -311,7 +296,7 @@ class LangChainRecorderCallback(BaseCallbackHandler):
         self._start(
             run_id=run_id,
             parent_run_id=parent_run_id,
-            name=serialized.get("name", "chain"),
+            name=(serialized or {}).get("name") or "chain",
             kind=SpanKind.CHAIN,
             inputs=inputs,
             metadata={
@@ -358,7 +343,7 @@ class LangChainRecorderCallback(BaseCallbackHandler):
         self._start(
             run_id=run_id,
             parent_run_id=parent_run_id,
-            name=serialized.get("name", "retriever"),
+            name=(serialized or {}).get("name") or "retriever",
             kind=SpanKind.RETRIEVER,
             inputs={"query": query},
             metadata={

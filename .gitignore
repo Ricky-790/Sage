@@ -10,3 +10,4 @@ wheels/
 .venv
 plan.md
 outputs
+.env
