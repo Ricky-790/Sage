@@ -3,6 +3,7 @@
 import os
 
 import pytest
+from dotenv import load_dotenv
 from langchain.agents import create_agent
 from langchain.tools import tool
 
@@ -16,6 +17,7 @@ from sage.recorder.tests.helpers import (
     single_trace,
 )
 
+load_dotenv()
 MODEL_NAME = "google/gemma-4-31b-it:free"
 TRACE_PATH = "src/sage/recorder/tests/outputs/weather_agent/traces.jsonl"
 chat_model = None
@@ -27,11 +29,13 @@ def get_chat_model():
     if chat_model is not None:
         return chat_model
 
-    google_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    google_key = os.environ.get("GOOGLE_API_KEY")
     if google_key:
         from langchain_google_genai import ChatGoogleGenerativeAI
 
-        chat_model = ChatGoogleGenerativeAI(model="gemma-4-31b-it", api_key=google_key)
+        chat_model = ChatGoogleGenerativeAI(
+            model="gemma-4-26b-a4b-it", api_key=google_key
+        )
         return chat_model
 
     openrouter_key = os.environ.get("OPENROUTER_API_KEY")
@@ -74,7 +78,11 @@ def test_weather_agent_full_trace():
     recorder = Recorder(TRACE_PATH)
     agent = make_agent()
     result = agent.invoke(
-        {"messages": [{"role": "user", "content": "What's the weather like where I am?"}]},
+        {
+            "messages": [
+                {"role": "user", "content": "What's the weather like where I am?"}
+            ]
+        },
         config={
             "callbacks": [LangChainRecorderCallback(recorder)],
             "recursion_limit": 12,
@@ -83,7 +91,9 @@ def test_weather_agent_full_trace():
 
     assert result["messages"], "no messages returned"
     spans = read_jsonl_spans(TRACE_PATH)
-    assert len(spans) >= 3, f"expected agent, llm and tool spans, got {[s.name for s in spans]}"
+    assert len(spans) >= 3, (
+        f"expected agent, llm and tool spans, got {[s.name for s in spans]}"
+    )
 
     trace_id = single_trace(spans)
     assert_time_containment(spans)
@@ -100,7 +110,9 @@ def test_weather_agent_full_trace():
 
     children = build_children(spans)
     roots = [s for s in spans if s.parent_span_id is None]
-    assert len(roots) == 1, f"expected a single root span, got {[s.name for s in roots]}"
+    assert len(roots) == 1, (
+        f"expected a single root span, got {[s.name for s in roots]}"
+    )
 
     # Both tool calls must descend from the single root span.
     def contains_root(span_id: str) -> bool:

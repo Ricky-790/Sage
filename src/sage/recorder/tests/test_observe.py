@@ -14,6 +14,7 @@ TRACE_PATH = "src/sage/recorder/tests/outputs/observe/traces.jsonl"
 
 recorder = Recorder(TRACE_PATH)
 
+
 @pytest.fixture(scope="module", autouse=True)
 def _trace_dir():
     from pathlib import Path
