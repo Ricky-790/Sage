@@ -1,10 +1,6 @@
-"""Unit tests for the @observe decorator and the Recorder's JSONL contract.
+"""Unit tests for the @observe decorator and the Recorder's JSONL contract."""
 
-Tests that read the JSONL file carry an xfail marker with the contract they
-encode the recorder must satisfy; they stop being xfail when the recorder
-writes pydantic Span schema lines.
-"""
-
+import asyncio
 import threading
 
 import pytest
@@ -17,8 +13,6 @@ from sage.recorder.tests.helpers import (
     read_jsonl_spans,
     single_trace,
 )
-
-CONTRACT = "Recorder must write pydantic Span schema JSONL; span() emits legacy dict fields today"
 
 
 def make_agent_pair(recorder):
@@ -34,7 +28,6 @@ def make_agent_pair(recorder):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason=CONTRACT)
 async def test_observe_nested_lineage(recorder, trace_path):
     run_agent = make_agent_pair(recorder)
 
@@ -64,7 +57,6 @@ async def test_observe_nested_lineage(recorder, trace_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason=CONTRACT)
 async def test_observe_three_level_nesting(recorder, trace_path):
     @recorder.observe(kind="span")
     async def inner(value: str) -> str:
@@ -92,7 +84,6 @@ async def test_observe_three_level_nesting(recorder, trace_path):
     assert_time_containment(spans)
 
 
-@pytest.mark.xfail(reason=CONTRACT)
 def test_observe_sync_function(recorder, trace_path):
     @recorder.observe(kind="tool")
     def double(n: int) -> int:
@@ -106,8 +97,9 @@ def test_observe_sync_function(recorder, trace_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.asyncio
 async def test_observe_custom_name_and_kwargs(recorder, trace_path):
-    @recorder.observe(name="custom.span", kind="agent")
+    @recorder.observe(name="custom.span", kind="agent", metadata={"region": "eu"})
     async def work(x: int, *, power: int = 2) -> int:
         return x**power
 
@@ -117,10 +109,10 @@ async def test_observe_custom_name_and_kwargs(recorder, trace_path):
     span = find_by_name(spans, "custom.span")
     assert span.kind == SpanKind.AGENT
     assert span.input == {"args": [3], "kwargs": {"power": 3}}
+    assert span.metadata == {"region": "eu"}
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason=CONTRACT)
 async def test_observe_unserializable_output(recorder, trace_path):
     marker = object()
 
@@ -136,7 +128,6 @@ async def test_observe_unserializable_output(recorder, trace_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason=CONTRACT)
 async def test_observe_two_sibling_tool_calls(recorder, trace_path):
     @recorder.observe(kind="tool")
     async def tool_a() -> str:
@@ -164,7 +155,6 @@ async def test_observe_two_sibling_tool_calls(recorder, trace_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason=CONTRACT)
 async def test_observe_errors_bubble_to_every_enclosing_span(recorder, trace_path):
     @recorder.observe(kind="tool")
     async def failing() -> None:
@@ -207,6 +197,25 @@ def test_observe_threads_get_isolated_traces(recorder, trace_path):
     assert len(spans) == 2, "each thread call records exactly one span"
     assert len(trace_ids) == 2, "each thread call opens its own trace"
     assert all(span.parent_span_id is None for span in spans)
+
+
+@pytest.mark.asyncio
+async def test_observe_cancelled_span(recorder, trace_path):
+    @recorder.observe(kind="agent")
+    async def slow() -> None:
+        await asyncio.sleep(10)
+
+    task = asyncio.create_task(slow())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    spans = read_jsonl_spans(trace_path)
+    span = find_by_name(spans, "slow")
+    assert span.status == SpanStatus.CANCELLED
+    assert span.error is None
+    assert span.ended_at is not None
 
 
 def test_record_span_contract(recorder, trace_path):

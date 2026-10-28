@@ -62,5 +62,12 @@ def assert_time_containment(spans: list[Span]) -> None:
 
 def find_by_name(spans: list[Span], name: str) -> Span:
     matches = [span for span in spans if span.name == name]
+    # The recorder names spans by __qualname__; locally-defined functions record
+    # as "factory.<locals>.name" and must still match their plain name.
+    matches += [
+        span
+        for span in spans
+        if span.name not in matches and span.name.endswith("<locals>." + name)
+    ]
     assert matches, f"no span named {name!r} (got {[s.name for s in spans]})"
     return matches[0]
