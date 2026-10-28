@@ -9,6 +9,8 @@ from sage.recorder.models import Span
 def read_jsonl_spans(path) -> list[Span]:
     """Read a traces JSONL file and validate every line against the Span schema."""
     path = Path(path)
+    if not path.exists():
+        return []
     lines = [
         json.loads(line)
         for line in path.read_text(encoding="utf-8").splitlines()

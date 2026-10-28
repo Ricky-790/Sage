@@ -1,6 +1,7 @@
 """Live weather agent test: full trace recorded via the LangChain callback handler."""
 
 import os
+from pathlib import Path
 
 import pytest
 from dotenv import load_dotenv
@@ -75,6 +76,7 @@ def make_agent():
 
 
 def test_weather_agent_full_trace():
+    Path(TRACE_PATH).parent.mkdir(parents=True, exist_ok=True)
     recorder = Recorder(TRACE_PATH)
     agent = make_agent()
     result = agent.invoke(
