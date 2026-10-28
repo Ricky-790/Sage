@@ -90,7 +90,6 @@ def test_callback_tolerates_none_serialized(recorder, trace_path):
     assert spans[0].kind == SpanKind.CHAIN
 
 
-@pytest.mark.xfail(reason=CONTRACT)
 def test_callback_records_llm_and_tool_errors(recorder, trace_path):
     handler = LangChainRecorderCallback(recorder)
     llm, tool = uuid4(), uuid4()

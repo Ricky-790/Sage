@@ -106,7 +106,6 @@ def test_observe_sync_function(recorder, trace_path):
 
 
 @pytest.mark.asyncio
-@pytest.mark.xfail(reason=CONTRACT)
 async def test_observe_custom_name_and_kwargs(recorder, trace_path):
     @recorder.observe(name="custom.span", kind="agent")
     async def work(x: int, *, power: int = 2) -> int:
@@ -187,7 +186,6 @@ async def test_observe_errors_bubble_to_every_enclosing_span(recorder, trace_pat
     assert_time_containment(spans)
 
 
-@pytest.mark.xfail(reason=CONTRACT)
 def test_observe_threads_get_isolated_traces(recorder, trace_path):
     @recorder.observe(kind="span")
     def work(n: int) -> int:
@@ -211,7 +209,6 @@ def test_observe_threads_get_isolated_traces(recorder, trace_path):
     assert all(span.parent_span_id is None for span in spans)
 
 
-@pytest.mark.xfail(reason="Recorder must expose record_span(Span); it is missing today")
 def test_record_span_contract(recorder, trace_path):
     span = Span(
         trace_id="t1",

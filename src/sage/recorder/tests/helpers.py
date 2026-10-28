@@ -38,14 +38,18 @@ def build_children(spans: list[Span]) -> dict[str, set[str]]:
 
 
 def assert_time_containment(spans: list[Span]) -> None:
-    """Every child span must start and end inside its parent's interval."""
+    """Every child span must start and end inside its parent's interval.
+
+    Parents can dangle: LangChain wrapper runs reference themselves as parents
+    without emitting their own events, and those are skipped.
+    """
     by_id = {span.span_id: span for span in spans}
     for span in spans:
         if not span.parent_span_id:
             continue
         parent = by_id.get(span.parent_span_id)
         if parent is None:
-            raise AssertionError(f"span {span.name} has missing parent {span.parent_span_id}")
+            continue
         assert span.started_at >= parent.started_at, (
             f"span {span.name!r} starts before parent {parent.name!r}"
         )
